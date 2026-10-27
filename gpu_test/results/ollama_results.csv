@@ -1,0 +1,6 @@
+timestamp,backend,model,params_b,quantization,load_time_s,model_mem_gib,ttft_ms_mean,ttft_ms_p95,itl_ms_mean,decode_tok_s_mean,prefill_tok_s_mean,prompt_tokens,concurrency,concurrent_throughput_tok_s,concurrent_mean_latency_ms,gpu_util_pct_mean,gpu_util_pct_max,power_w_mean,power_w_max,status,error
+2026-09-07T17:00:12.506930+00:00,ollama,qwen2.5-1.5b,1.5,q4_k_m,0.0,2.1,11.8,11.0,6.2,158.45,100840.4,3043,8,162.38,2700.4,81.7,93.0,37.07,44.08,ok,
+2026-09-07T17:00:21.385327+00:00,ollama,qwen2.5-7b,7,q4_k_m,4.6,6.6,36.5,36.2,28.26,34.92,48811.7,3043,8,35.39,12623.6,91.2,96.0,36.36,71.7,ok,
+2026-09-07T17:05:37.191484+00:00,ollama,qwen2.5-14b,14,q4_k_m,4.9,15.0,63.6,71.0,50.53,19.6,29915.7,3043,8,19.43,29572.9,94.5,96.0,38.11,84.44,ok,
+2026-09-07T17:07:10.587854+00:00,ollama,qwen2.5-32b,32,q4_k_m,9.8,20.0,130.7,132.7,110.1,8.96,14598.5,3043,8,8.94,43514.8,94.6,96.0,36.89,86.03,ok,
+2026-09-08T10:37:49.771704+00:00,ollama,qwen2.5-72b,72,q4_k_m,9.5,57.0,265.5,263.8,230.55,4.3,7829.7,3043,8,4.23,134402.6,95.9,96.0,46.58,93.86,ok,
