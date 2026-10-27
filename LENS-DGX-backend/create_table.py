@@ -1,7 +1,7 @@
-"""Creates the codcot results table if it doesn't already exist.
+"""Creates the results table if it doesn't already exist.
 
 Run this once per environment before starting the service:
-    CODCOT_ENV=dev python create_table.py
+    LENS_DGX_ENV=dev python create_table.py
 
 Schema is deliberately loose: only run_id is guaranteed to exist on every
 row, since the model's CSV output columns vary per run. See write_bq.py

@@ -1,6 +1,6 @@
 """Structured per-message logging for testing/debugging.
 
-Writes one JSON line per processed message to CODCOT_LOG_DIR/inference_log.jsonl
+Writes one JSON line per processed message to LENS_DGX_LOG_DIR/inference_log.jsonl
 with the input, the model's raw output, the outcome, and timing -- separate
 from the regular application log (which stays human-readable). Meant to be
 tailed/grepped while testing the pipeline end to end, e.g.:
@@ -31,7 +31,13 @@ class InferenceLogger:
         status: str,
         output_text: Optional[str] = None,
         error: Optional[str] = None,
+        project_id: Optional[str] = None,
+        letter_id: Optional[str] = None,
+        datetime_sent: Optional[str] = None,
+        received_at: Optional[str] = None,
+        transit_latency_ms: Optional[float] = None,
         inference_latency_ms: Optional[float] = None,
+        bq_insert_latency_ms: Optional[float] = None,
         total_processing_ms: Optional[float] = None,
         row_count: Optional[int] = None,
     ) -> None:
@@ -39,13 +45,21 @@ class InferenceLogger:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "message_id": message_id,
             "run_id": run_id,
+            "project_id": project_id,
+            "letter_id": letter_id,
             "status": status,
             "input_preview": input_text[:500] if input_text else None,
             "input_chars": len(input_text) if input_text else 0,
             "output_preview": output_text[:1000] if output_text else None,
             "row_count": row_count,
             "error": error,
+            # Producer-reported send time vs. our own wall-clock receipt time,
+            # so transit_latency_ms covers Pub/Sub delivery, not just our own work.
+            "datetime_sent": datetime_sent,
+            "received_at": received_at,
+            "transit_latency_ms": round(transit_latency_ms, 1) if transit_latency_ms is not None else None,
             "inference_latency_ms": round(inference_latency_ms, 1) if inference_latency_ms is not None else None,
+            "bq_insert_latency_ms": round(bq_insert_latency_ms, 1) if bq_insert_latency_ms is not None else None,
             "total_processing_ms": round(total_processing_ms, 1) if total_processing_ms is not None else None,
         }
         line = json.dumps(entry, ensure_ascii=False)

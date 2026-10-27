@@ -1,0 +1,9 @@
+# Secrets -- never commit service-account keys.
+credentials/
+
+# Local environment / runtime artifacts.
+.venv/
+__pycache__/
+*.pyc
+logs/
+service.out

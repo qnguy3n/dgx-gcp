@@ -1,7 +1,7 @@
 """Entry point: subscribes to Pub/Sub and processes messages until killed.
 
 Usage:
-    CODCOT_ENV=dev python main.py
+    LENS_DGX_ENV=dev python main.py
 
 Run create_table.py once per environment first to make sure the BigQuery
 table exists.
@@ -23,17 +23,17 @@ from consume import make_callback
 from test_logger import InferenceLogger
 
 logging.basicConfig(
-    level=os.environ.get("CODCOT_LOG_LEVEL", "INFO"),
+    level=os.environ.get("LENS_DGX_LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logger = logging.getLogger("codcot.main")
+logger = logging.getLogger("lens_dgx.main")
 
 
 def main() -> int:
     config = load_config()
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config.credentials_path
     logger.info(
-        "starting codcot service: env=%s project=%s subscription=%s table=%s vllm=%s concurrency=%d",
+        "starting lens-dgx-backend service: env=%s project=%s subscription=%s table=%s vllm=%s concurrency=%d",
         config.env, config.project_id, config.subscription_id, config.bq_table_id,
         config.vllm_url, config.max_concurrency,
     )

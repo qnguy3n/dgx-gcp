@@ -1,14 +1,14 @@
 [Unit]
-Description=codcot Pub/Sub -> vLLM -> BigQuery pipeline
+Description=LENS DGX backend: Pub/Sub -> vLLM -> BigQuery pipeline
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=quangnn
-WorkingDirectory=/home/quangnn/projects/LENS/LENS-DGX-backend
-Environment=CODCOT_ENV=dev
-ExecStart=/home/quangnn/projects/LENS/codcot_tests/.venv/bin/python3 main.py
+WorkingDirectory=/home/quangnn/projects/LENS/dgx-gcp/LENS-DGX-backend
+Environment=LENS_DGX_ENV=dev
+ExecStart=/home/quangnn/projects/LENS/dgx-gcp/LENS-DGX-backend/.venv/bin/python3 main.py
 Restart=on-failure
 RestartSec=5
 # Give in-flight messages time to finish (BQ insert + ack) on shutdown.

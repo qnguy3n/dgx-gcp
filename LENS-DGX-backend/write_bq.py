@@ -13,6 +13,7 @@ Schema (see create_table.py):
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -34,7 +35,11 @@ def build_ok_rows(
         {
             "run_id": run_id,
             "row_index": i,
-            "fields": row,
+            # JSON-typed columns go over the legacy streaming-insert API
+            # (insert_rows_json) as a JSON *string*, not a nested dict --
+            # passing a dict here gets misread as an attempt to populate a
+            # RECORD column and is rejected with "not a record".
+            "fields": json.dumps(row),
             "raw_row": ",".join(row.values()),
             "status": "ok",
             "error": None,
