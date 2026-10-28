@@ -53,15 +53,21 @@ def load_config() -> Config:
             "ml-model-runner-f22694eb.lens_dgx_spark_dev.results",
         )
     elif env == "prod":
-        # No prod subscription/table id has been confirmed yet -- require
-        # them explicitly rather than guessing.
-        project_id = _env("LENS_DGX_PROJECT_ID", required=True)
+        # GCP project and BQ dataset are the same project as dev; only the
+        # dataset name differs (lens_dgx_spark_prod vs lens_dgx_spark_dev).
+        # Subscription id has no confirmed prod value yet -- require it
+        # explicitly so a misconfigured service fails loudly rather than
+        # silently reading from the wrong queue.
+        project_id = _env("LENS_DGX_PROJECT_ID", "ml-model-runner-f22694eb")
         subscription_id = _env("LENS_DGX_SUBSCRIPTION_ID", required=True)
         credentials_path = _env(
             "GOOGLE_APPLICATION_CREDENTIALS",
             os.path.join(_CREDENTIALS_DIR, "prod_auth.json"),
         )
-        bq_table_id = _env("LENS_DGX_BQ_TABLE_ID", required=True)
+        bq_table_id = _env(
+            "LENS_DGX_BQ_TABLE_ID",
+            "ml-model-runner-f22694eb.lens_dgx_spark_prod.results",
+        )
     else:
         raise RuntimeError(f"Unknown LENS_DGX_ENV={env!r}, expected 'dev' or 'prod'")
 

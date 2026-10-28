@@ -129,7 +129,7 @@ values; `prod` requires `LENS_DGX_PROJECT_ID`, `LENS_DGX_SUBSCRIPTION_ID`,
 | `LENS_DGX_PROJECT_ID` | `ml-model-runner-f22694eb` | GCP project |
 | `LENS_DGX_SUBSCRIPTION_ID` | `lens-dgx-spark-dev-input` | Pub/Sub subscription |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `credentials/dev_auth.json` | Service account key |
-| `LENS_DGX_BQ_TABLE_ID` | `ml-model-runner-f22694eb.lens_dgx_spark_dev.results` | Output table |
+| `LENS_DGX_BQ_TABLE_ID` | `ml-model-runner-f22694eb.lens_dgx_spark_dev.results` (dev) / `ml-model-runner-f22694eb.lens_dgx_spark_prod.results` (prod) | Output table |
 | `LENS_DGX_VLLM_URL` | `http://localhost:8000` | vLLM server |
 | `LENS_DGX_MODEL_NAME` | `openai/gpt-oss-20b` | Must match `--served-model-name` / model tag vLLM was started with |
 | `LENS_DGX_MAX_CONCURRENCY` | `4` | Max in-flight messages / vLLM requests at once |
