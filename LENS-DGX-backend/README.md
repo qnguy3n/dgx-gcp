@@ -6,15 +6,38 @@ Fully self-contained: its own `.venv`, its own copies of the service-account
 keys (`credentials/`), its own test-publish tool (`tools/`). Nothing here
 reaches outside this folder.
 
+## Architecture: LENS ↔ DGX-GCP
+
+This service is the **DGX-side worker** in a two-machine setup.  The LENS
+web application (running on a separate machine with no direct network path to
+the DGX GPU server) uses GCP as the communication channel:
+
+```
+LENS machine                          DGX machine
+────────────────                      ────────────────────────────
+LENS backend                          LENS-DGX-backend (this repo)
+  │                                     │
+  │  Pub/Sub publish (one msg/letter)   │
+  ├──────────────────────────────────►  │  subscribe → vLLM → BigQuery
+  │                                     │
+  │  BigQuery poll (STARTS_WITH run_id))│
+  ◄─────────────────────────────────────┤
+```
+
+**Message run_id convention**: LENS sets `run_id = "{lens_run_id}:{letter_id}"`.
+This lets LENS query all rows for a run with `STARTS_WITH(run_id, "{lens_run_id}:")`
+and recover the individual letter ID from the suffix — no BigQuery schema change
+needed on this side.
+
 Each Pub/Sub message is:
 
 ```json
 {
-    "run_id": "...",
-    "project_id": "...",      // which clinical project/study this letter belongs to
-    "letter_id": "...",       // id of the source letter within that project
-    "datetime_sent": "...",   // ISO-8601 UTC, set by the producer at publish time
-    "letter_body": "<instruction + text>"
+    "run_id": "{lens_run_id}:{letter_id}",
+    "project_id": "...",      // LENS study_id
+    "letter_id": "...",       // row ID column value from LENS
+    "datetime_sent": "...",   // ISO-8601 UTC, set by LENS at publish time
+    "letter_body": "<instruction + text>"  // fully-formatted prompt
 }
 ```
 
@@ -23,9 +46,11 @@ messages without them still work) but are threaded through to
 `logs/inference_log.jsonl` when present — `datetime_sent` in particular is
 used to measure transit latency (see Timing below). The instruction is
 already embedded in `letter_body`, so it's sent to vLLM verbatim as the user
-turn — no prompt is added here. The model's response is expected to look
-like a CSV (header row + data rows); columns aren't fixed ahead of time, so
-they're stored as a BigQuery `JSON` column rather than named columns.
+turn — no prompt is added here.
+
+The model's response can be **JSON** (preferred, as LENS prompts produce) or
+**CSV** (header row + data rows). `csv_parse.py` tries JSON first and falls
+back to CSV, so both shapes are stored correctly in BigQuery.
 
 ## Timing
 
@@ -49,9 +74,9 @@ machine's clock being roughly in sync with the producer's.
 |---|---|
 | `config.py` | Env-var driven config (dev/prod project, subscription, table, vLLM URL) |
 | `main.py` | Entry point — opens the Pub/Sub streaming pull and blocks |
-| `consume.py` | Per-message callback: parse → infer → parse CSV → write BQ → ack/nack |
+| `consume.py` | Per-message callback: parse → infer → parse output → write BQ → ack/nack |
 | `infer.py` | HTTP call to the vLLM OpenAI-compatible endpoint |
-| `csv_parse.py` | Parses the model's CSV-like output into row dicts |
+| `csv_parse.py` | Parses model output: JSON first, then CSV fallback |
 | `write_bq.py` | Builds BigQuery rows and does the streaming insert |
 | `create_table.py` | One-time table creation/migration |
 | `test_logger.py` | Writes `logs/inference_log.jsonl` — one line per message with input, output, and timing, for testing |
