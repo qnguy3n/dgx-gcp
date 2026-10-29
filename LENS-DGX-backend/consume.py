@@ -67,7 +67,7 @@ def _insert_rows_timed(bq_client: bigquery.Client, table_id: str, rows: list) ->
 
 
 def make_callback(config: Config, bq_client: bigquery.Client, inference_log: InferenceLogger):
-    def callback(message: pubsub_v1.subscriber.message.Message) -> None:
+    def _process_message(message: pubsub_v1.subscriber.message.Message) -> None:
         received_at_dt = datetime.now(timezone.utc)
         received_at = received_at_dt.isoformat()
         t_start = time.monotonic()
@@ -194,5 +194,26 @@ def make_callback(config: Config, bq_client: bigquery.Client, inference_log: Inf
             row_count=len(rows),
         )
         message.ack()
+
+    def callback(message: pubsub_v1.subscriber.message.Message) -> None:
+        # Last-resort safety net. On 2026-10-28, a malformed/ragged CSV
+        # row from the model produced a non-string dict value that
+        # crashed _process_message with an uncaught TypeError; that
+        # propagated out of the callback, through the Pub/Sub client's
+        # streaming-pull future, and into main.py's `except Exception`
+        # handler, which logs it as "stream ended" and returns 0 --
+        # a *clean* exit, so systemd's Restart=on-failure never fired.
+        # The whole service silently stopped processing all messages
+        # until someone noticed. No single message should ever be able
+        # to do that again: catch anything _process_message doesn't
+        # already handle itself, log it, and nack for retry instead of
+        # letting it escape.
+        try:
+            _process_message(message)
+        except Exception:
+            logger.exception(
+                "message %s: unhandled exception in callback, nacking for retry", message.message_id,
+            )
+            message.nack()
 
     return callback

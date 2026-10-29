@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batch Size vs Roundabout Latency</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f3f3f3;
+    --accent: #1a5fb4;
+    --ok: #1e6b2f;
+    --warn: #9a5b00;
+    --row-alt: #f8f8f8;
+    --callout-bg: #f3f6fb;
+    --grid: #e4e4e4;
+    --line-total: #1a5fb4;
+    --line-fanout: #a7420e;
+    --line-transit: #2c8a4b;
+    --line-bq: #8b5fbf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181d;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #3a3f47;
+      --code-bg: #1d2127;
+      --accent: #6ba6f0;
+      --ok: #4fb365;
+      --warn: #d99a3e;
+      --row-alt: #1a1e24;
+      --callout-bg: #1b2330;
+      --grid: #2a2f37;
+      --line-total: #6ba6f0;
+      --line-fanout: #e0824a;
+      --line-transit: #5fc783;
+      --line-bq: #b79ae0;
+    }
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.6rem; }
+  .subtitle { color: var(--muted); margin-top: 0; font-size: 0.95rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.87rem;
+    margin: 1rem 0;
+  }
+  caption { text-align: left; color: var(--muted); font-size: 0.85rem; margin-bottom: 0.4rem; }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.65rem;
+    text-align: right;
+  }
+  th:first-child, td:first-child, th.l, td.l { text-align: left; }
+  th { background: var(--row-alt); font-weight: 600; }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+  .callout {
+    background: var(--callout-bg);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  .callout.caveat { border-left-color: var(--warn); }
+  .big-number { font-size: 2rem; font-weight: 700; color: var(--accent); }
+  .chart-wrap { margin: 1.5rem 0; }
+  .chart-wrap svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 1.3rem; font-size: 0.82rem; color: var(--muted); margin: 0.6rem 0 1.5rem; flex-wrap: wrap; }
+  .legend span::before { content: "\2014\2014  "; font-weight: 700; }
+  .legend .l-total::before { color: var(--line-total); }
+  .legend .l-fanout::before { color: var(--line-fanout); }
+  .legend .l-transit::before { color: var(--line-transit); }
+  .legend .l-bq::before { color: var(--line-bq); }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+  .appendix { margin-top: 3.5rem; padding-top: 1rem; border-top: 3px double var(--border); }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Batch Size vs Roundabout Latency</h1>
+<p class="subtitle">Real measurement: as more letters are bundled into one Pub/Sub message, how much does the <strong>roundabout</strong> &mdash; Pub/Sub push+pull and the BigQuery write &mdash; cost per letter? vLLM inference time is deliberately excluded here (see the appendix below if you want that included too).</p>
+<p class="meta">2026-10-29 &middot; DGX Spark (GB10) &middot; production <code>lens-dgx-backend</code> service stopped for the duration of this test (exclusive use of the real subscription)</p>
+
+<h2>Answer</h2>
+<p>Clean, monotonic win, no caveats about a bottleneck: the roundabout cost per letter drops from <span class="big-number">2.80s</span> at B=1 to <span class="big-number">92ms</span> at B=16 &mdash; a ~30&times; reduction. It behaves almost exactly like <code>fixed_cost &divide; B</code>, because both Pub/Sub transit and the BigQuery insert are essentially fixed per-message/per-call costs, independent of how many letters ride along.</p>
+
+<div class="chart-wrap">
+<svg viewBox="0 0 760 420" role="img" aria-label="Line chart of roundabout latency (Pub/Sub transit + BigQuery insert) per letter vs batch size B, log2 x-axis">
+  <!-- plot area: x 70..740, y 24..360 (0 at bottom=360, max 2800 at top=24) -->
+  <g stroke="var(--grid)" stroke-width="1">
+    <line x1="70" y1="360" x2="740" y2="360"/>
+    <line x1="70" y1="276" x2="740" y2="276"/>
+    <line x1="70" y1="192" x2="740" y2="192"/>
+    <line x1="70" y1="108" x2="740" y2="108"/>
+    <line x1="70" y1="24" x2="740" y2="24"/>
+  </g>
+  <g fill="var(--muted)" font-size="11" text-anchor="end" font-family="monospace">
+    <text x="62" y="364">0</text>
+    <text x="62" y="280">700</text>
+    <text x="62" y="196">1400</text>
+    <text x="62" y="112">2100</text>
+    <text x="62" y="28">2800</text>
+  </g>
+  <line x1="70" y1="360" x2="740" y2="360" stroke="var(--fg)" stroke-width="1.2"/>
+  <line x1="70" y1="24" x2="70" y2="360" stroke="var(--fg)" stroke-width="1.2"/>
+  <g fill="var(--fg)" font-size="13" text-anchor="middle" font-family="monospace">
+    <text x="110" y="382">B=1</text>
+    <text x="250" y="382">B=2</text>
+    <text x="390" y="382">B=4</text>
+    <text x="530" y="382">B=8</text>
+    <text x="670" y="382">B=16</text>
+  </g>
+  <text x="405" y="408" text-anchor="middle" fill="var(--muted)" font-size="12">Batch size B (log2 scale)</text>
+  <text x="-205" y="18" transform="rotate(-90)" fill="var(--muted)" font-size="12">Roundabout time per letter (ms)</text>
+
+  <!-- y-scale: 0..2800ms maps to y 360..24, y = 360 - value*0.12 -->
+  <!-- series (ms): roundabout_total(transit+bq)/B = 2796, 1222, 445, 174, 92 -->
+  <!--              transit/B                      = 2349, 1173,  429, 165, 84 -->
+  <!--              bq_insert/B                     =  446,   49,   15,   9,  8 -->
+
+  <polyline points="110,24 250,213 390,307 530,339 670,349"
+            fill="none" stroke="var(--line-total)" stroke-width="2.6"/>
+  <polyline points="110,78 250,219 390,308 530,340 670,350"
+            fill="none" stroke="var(--line-transit)" stroke-width="1.8" stroke-dasharray="6 3"/>
+  <polyline points="110,306 250,354 390,358 530,359 670,359"
+            fill="none" stroke="var(--line-bq)" stroke-width="1.8" stroke-dasharray="6 3"/>
+
+  <g>
+    <circle cx="110" cy="24" r="4" fill="var(--line-total)"/>
+    <circle cx="250" cy="213" r="4" fill="var(--line-total)"/>
+    <circle cx="390" cy="307" r="4" fill="var(--line-total)"/>
+    <circle cx="530" cy="339" r="4" fill="var(--line-total)"/>
+    <circle cx="670" cy="349" r="4" fill="var(--line-total)"/>
+  </g>
+  <g fill="var(--line-total)" font-size="11" font-family="monospace" text-anchor="middle">
+    <text x="110" y="17">2796ms</text>
+    <text x="250" y="206">1222ms</text>
+    <text x="390" y="300">445ms</text>
+    <text x="530" y="332">174ms</text>
+    <text x="670" y="342">92ms</text>
+  </g>
+</svg>
+</div>
+<div class="legend">
+  <span class="l-total">Roundabout total per letter (transit + BQ insert, &divide; B)</span>
+  <span class="l-transit">Pub/Sub transit share (&divide; B)</span>
+  <span class="l-bq">BigQuery insert share (&divide; B)</span>
+</div>
+
+<h2>Method</h2>
+<p>Same real test run as before (real Pub/Sub publish+pull, real BigQuery insert, production service stopped for exclusive access to the subscription) &mdash; this report just isolates a different pair of numbers from it. <code>transit_ms</code> and <code>bq_insert_ms</code> don't depend on how long vLLM took: transit is measured entirely before inference even starts (publish &rarr; this script receiving the message), and the BigQuery insert's duration depends on row count, not on how long the model took to generate them. So pulling these two out and ignoring the vLLM fan-out time is a clean, valid way to isolate the roundabout's own cost.</p>
+<pre>roundabout_per_letter_ms = (transit_ms + bq_insert_ms) / B</pre>
+
+<h2>Results</h2>
+<table>
+  <caption>Real measurements per batch size (ms)</caption>
+  <thead>
+    <tr><th class="l">B</th><th>transit</th><th>bq_insert</th><th>roundabout total</th><th>roundabout per letter</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="l">1</td><td>2349</td><td>446</td><td>2796</td><td><strong>2796</strong></td></tr>
+    <tr><td class="l">2</td><td>2345</td><td>98</td><td>2443</td><td><strong>1222</strong></td></tr>
+    <tr><td class="l">4</td><td>1717</td><td>61</td><td>1778</td><td><strong>445</strong></td></tr>
+    <tr><td class="l">8</td><td>1316</td><td>74</td><td>1390</td><td><strong>174</strong></td></tr>
+    <tr><td class="l">16</td><td>1349</td><td>126</td><td>1476</td><td><strong>92</strong></td></tr>
+  </tbody>
+</table>
+<p>Both components shrink on their own as B grows &mdash; transit's <em>absolute</em> value even drops a little (2349ms &rarr; ~1.3&ndash;1.7s) because larger batches happened to pull through slightly faster in this run, not because bigger payloads transit faster; treat that as noise, not a trend. What matters is that neither component scales up with B, so dividing by a bigger B just keeps shrinking the per-letter share. BigQuery's insert in particular stays near-flat in absolute terms (446ms &rarr; 61&ndash;126ms) regardless of row count in this range, confirming its cost here is almost entirely fixed round-trip overhead, not per-row work.</p>
+
+<h2>Caveat</h2>
+<div class="callout caveat">
+  <p><strong>Transit was measured with publisher and subscriber on the same machine</strong>, and this script was the only consumer on the subscription (production service stopped) &mdash; no real network hop, no contention. Your actual LENS&harr;DGX deployment is two separate machines; real network transit plus any clock drift between them isn't captured here. This measures Pub/Sub's own overhead floor, not the full real-world number.</p>
+</div>
+
+<h2>Side effect</h2>
+<p>This test wrote rows into the production <code>lens_dgx_spark_dev.results</code> BigQuery table (<code>project_id = "batching-sim"</code>, <code>run_id</code> prefixed <code>batchsim-</code>), on top of the 5 rows from the earlier roundabout test (<code>project_id = "roundabout-sim"</code>). Both are tagged for easy identification and removal.</p>
+
+<div class="appendix">
+<h2>Appendix: if vLLM inference time is included too</h2>
+<p>A related but different question: what happens to <em>total</em> per-letter time (roundabout + vLLM) as B grows? Same underlying test run, same real data, different metric. Short version: it's not a clean win like the roundabout-only result above, because vLLM introduces a second, opposing effect.</p>
+
+<h3>Total per-letter time (including vLLM fan-out)</h3>
+<div class="chart-wrap">
+<svg viewBox="0 0 760 420" role="img" aria-label="Line chart of total per-letter time including vLLM fan-out, vs batch size B, log2 x-axis">
+  <g stroke="var(--grid)" stroke-width="1">
+    <line x1="70" y1="360" x2="740" y2="360"/>
+    <line x1="70" y1="276" x2="740" y2="276"/>
+    <line x1="70" y1="192" x2="740" y2="192"/>
+    <line x1="70" y1="108" x2="740" y2="108"/>
+    <line x1="70" y1="24" x2="740" y2="24"/>
+  </g>
+  <g fill="var(--muted)" font-size="11" text-anchor="end" font-family="monospace">
+    <text x="62" y="364">0</text>
+    <text x="62" y="280">5000</text>
+    <text x="62" y="196">10000</text>
+    <text x="62" y="112">15000</text>
+    <text x="62" y="28">20000</text>
+  </g>
+  <line x1="70" y1="360" x2="740" y2="360" stroke="var(--fg)" stroke-width="1.2"/>
+  <line x1="70" y1="24" x2="70" y2="360" stroke="var(--fg)" stroke-width="1.2"/>
+  <g fill="var(--fg)" font-size="13" text-anchor="middle" font-family="monospace">
+    <text x="110" y="382">B=1</text>
+    <text x="250" y="382">B=2</text>
+    <text x="390" y="382">B=4</text>
+    <text x="530" y="382">B=8</text>
+    <text x="670" y="382">B=16</text>
+  </g>
+  <text x="405" y="408" text-anchor="middle" fill="var(--muted)" font-size="12">Batch size B (log2 scale)</text>
+  <text x="-190" y="18" transform="rotate(-90)" fill="var(--muted)" font-size="12">Per-letter time (ms)</text>
+
+  <!-- y-scale: 0..20000ms maps to y 360..24, y = 360 - value*0.0168 -->
+  <!-- series (ms): total(transit+fanout+bq)/B = 17669, 11543, 6428, 3404, 5079 -->
+  <!--              vLLM fan-out share/B        = 14873, 10322, 5983, 3231, 4987 -->
+
+  <polyline points="110,63 250,166 390,252 530,303 670,275"
+            fill="none" stroke="var(--line-total)" stroke-width="2.6"/>
+  <polyline points="110,110 250,187 390,259 530,306 670,276"
+            fill="none" stroke="var(--line-fanout)" stroke-width="2" stroke-dasharray="6 3"/>
+
+  <g>
+    <circle cx="110" cy="63" r="4" fill="var(--line-total)"/>
+    <circle cx="250" cy="166" r="4" fill="var(--line-total)"/>
+    <circle cx="390" cy="252" r="4" fill="var(--line-total)"/>
+    <circle cx="530" cy="303" r="4" fill="var(--line-total)"/>
+    <circle cx="670" cy="275" r="4" fill="var(--line-total)"/>
+  </g>
+  <g fill="var(--line-total)" font-size="11" font-family="monospace" text-anchor="middle">
+    <text x="110" y="56">17669</text>
+    <text x="250" y="159">11543</text>
+    <text x="390" y="245">6428</text>
+    <text x="530" y="296">3404</text>
+    <text x="670" y="268">5079</text>
+  </g>
+</svg>
+</div>
+<div class="legend">
+  <span class="l-total">Total per-letter time (roundabout + vLLM fan-out, &divide; B)</span>
+  <span class="l-fanout">vLLM fan-out share (&divide; B)</span>
+</div>
+
+<table>
+  <caption>Full measurements, including vLLM fan-out (ms)</caption>
+  <thead>
+    <tr><th class="l">B</th><th>transit</th><th>fan_out (wall)</th><th>per-call mean</th><th>bq_insert</th><th>total_batch</th><th>per_letter</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="l">1</td><td>2349</td><td>14873</td><td>14872</td><td>446</td><td>17669</td><td><strong>17669</strong></td></tr>
+    <tr><td class="l">2</td><td>2345</td><td>20643</td><td>13741</td><td>98</td><td>23087</td><td><strong>11543</strong></td></tr>
+    <tr><td class="l">4</td><td>1717</td><td>23932</td><td>13805</td><td>61</td><td>25711</td><td><strong>6428</strong></td></tr>
+    <tr><td class="l">8</td><td>1316</td><td>25845</td><td>11204</td><td>74</td><td>27235</td><td><strong>3404</strong></td></tr>
+    <tr><td class="l">16</td><td>1349</td><td>79791</td><td>16209</td><td>126</td><td>81267</td><td><strong>5079</strong></td></tr>
+  </tbody>
+</table>
+
+<p>Here the win stalls past B=4 and even reverses at B=16, because this service's <code>LENS_DGX_MAX_CONCURRENCY=4</code> caps how many letters vLLM processes at once regardless of batch size. At B&le;4, every letter fits in one concurrent round, so fan-out time stays close to a single call's latency &mdash; that's where almost all of the B=1&rarr;4 improvement above comes from. Past B=4, extra letters queue into more sequential rounds of 4 (B=8 &asymp; 2 rounds, B=16 &asymp; 4 rounds), so fan-out time grows roughly linearly with B again, and <code>openai/gpt-oss-20b</code>'s real per-call variance (11.2s&ndash;16.2s mean across these five runs) is large enough that B=16 lands worse than B=8 in this single run &mdash; noise, not a reversal of the underlying effect. Batching more letters into fewer messages can't fix this part; only raising <code>LENS_DGX_MAX_CONCURRENCY</code> (GPU memory permitting) would let the improvement continue past B=4. This is also a single run per B against a highly variable model &mdash; not averaged over repeats.</p>
+</div>
+
+<footer>
+  Generated during the <code>feature/lens-compat</code> development session &middot; see <a href="pubsub-bigquery-roundabout-latency.html">the earlier roundabout latency report</a> and <code>PROGRESS_LOG.md</code> for surrounding context.
+</footer>
+
+</body>
+</html>

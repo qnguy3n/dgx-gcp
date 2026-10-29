@@ -40,7 +40,12 @@ def build_ok_rows(
             # passing a dict here gets misread as an attempt to populate a
             # RECORD column and is rejected with "not a record".
             "fields": json.dumps(row),
-            "raw_row": ",".join(row.values()),
+            # str()-coerce defensively: csv_parse.py's contract is
+            # Dict[str, str], but a crash here previously took the whole
+            # service down (see PROGRESS_LOG.md, 2026-10-28) when that
+            # contract was violated. Cheap insurance against it happening
+            # again from some other code path.
+            "raw_row": ",".join("" if v is None else str(v) for v in row.values()),
             "status": "ok",
             "error": None,
             "model_name": model_name,

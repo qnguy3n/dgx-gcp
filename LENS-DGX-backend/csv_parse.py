@@ -55,11 +55,25 @@ def parse_csv_output(raw_text: str) -> List[Dict[str, str]]:
             pass  # fall through to CSV
 
     # --- CSV path ---
-    reader = csv.DictReader(io.StringIO(cleaned))
+    # restval="" so a short row (fewer fields than the header) gets ""
+    # instead of DictReader's default None in the missing columns.
+    reader = csv.DictReader(io.StringIO(cleaned), restval="")
     if not reader.fieldnames or all((f is None or not f.strip()) for f in reader.fieldnames):
         raise ValueError("no header row detected (not valid JSON or CSV)")
 
-    rows = [row for row in reader if any((v or "").strip() for v in row.values())]
+    rows = []
+    for row in reader:
+        if None in row:
+            # Ragged row: more fields than the header has columns.
+            # DictReader stashes the overflow as a list under key None --
+            # not reliably structured data, so bail out to parse_error
+            # (raw output preserved) rather than guessing where it goes.
+            raise ValueError(
+                f"CSV row has more fields than the {len(reader.fieldnames)}-column header"
+            )
+        if any((v or "").strip() for v in row.values()):
+            rows.append(row)
+
     if not rows:
         raise ValueError("no data rows after header")
 
