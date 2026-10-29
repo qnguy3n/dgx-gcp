@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pub/Sub + BigQuery Roundabout Latency</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f3f3f3;
+    --accent: #1a5fb4;
+    --ok: #1e6b2f;
+    --warn: #9a5b00;
+    --row-alt: #f8f8f8;
+    --callout-bg: #f3f6fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181d;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #3a3f47;
+      --code-bg: #1d2127;
+      --accent: #6ba6f0;
+      --ok: #4fb365;
+      --warn: #d99a3e;
+      --row-alt: #1a1e24;
+      --callout-bg: #1b2330;
+    }
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  .subtitle { color: var(--muted); margin-top: 0; font-size: 0.95rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 2rem; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88rem;
+    margin: 1rem 0;
+  }
+  caption { text-align: left; color: var(--muted); font-size: 0.85rem; margin-bottom: 0.4rem; }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.65rem;
+    text-align: right;
+  }
+  th:first-child, td:first-child, th.l, td.l { text-align: left; }
+  th { background: var(--row-alt); font-weight: 600; }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+  tr.summary td { font-weight: 600; border-top: 2px solid var(--border); }
+  .status-ok { color: var(--ok); }
+  .status-err { color: var(--warn); }
+  .callout {
+    background: var(--callout-bg);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.9rem 1.1rem;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  .callout.caveat { border-left-color: var(--warn); }
+  .big-number {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .breakdown-bar {
+    display: flex;
+    height: 28px;
+    border-radius: 5px;
+    overflow: hidden;
+    margin: 0.8rem 0 0.4rem;
+    border: 1px solid var(--border);
+  }
+  .breakdown-bar div { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.78rem; font-weight: 600; }
+  .seg-transit { background: #1a5fb4; }
+  .seg-bq { background: #a7420e; }
+  .seg-internal { background: #6a6a6a; }
+  .legend { display: flex; gap: 1.5rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 1.5rem; }
+  .legend span::before { content: "■ "; }
+  .legend .l-transit::before { color: #1a5fb4; }
+  .legend .l-bq::before { color: #a7420e; }
+  .legend .l-internal::before { color: #6a6a6a; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>Pub/Sub + BigQuery Roundabout Latency</h1>
+<p class="subtitle">How much does the Pub/Sub &rarr; vLLM &rarr; BigQuery pipeline add on top of raw vLLM inference time?</p>
+<p class="meta">2026-10-28 &middot; DGX Spark (GB10), <code>lens-dgx-backend</code> service, model <code>openai/gpt-oss-20b</code></p>
+
+<h2>Answer</h2>
+<p>The roundabout adds <span class="big-number">~1.3&ndash;2.2s</span> per message (median ~1.8s), on top of whatever vLLM itself takes to generate a response.</p>
+
+<div class="breakdown-bar">
+  <div class="seg-transit" style="flex: 90;">Pub/Sub transit &mdash; ~90%</div>
+  <div class="seg-bq" style="flex: 10;">BQ</div>
+</div>
+<div class="legend">
+  <span class="l-transit">Pub/Sub transit (publish &rarr; arrival)</span>
+  <span class="l-bq">BigQuery insert</span>
+  <span class="l-internal">Internal (CSV parse, Python overhead) &mdash; negligible, not visible at this scale</span>
+</div>
+
+<table>
+  <caption>Mean overhead per message, decomposed</caption>
+  <thead>
+    <tr><th class="l">Component</th><th>Mean</th><th>Share</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="l">Pub/Sub transit (publish &rarr; arrival)</td><td>~1.50s</td><td>~90%</td></tr>
+    <tr><td class="l">BigQuery insert</td><td>~0.16s</td><td>~10%</td></tr>
+    <tr><td class="l">Internal (CSV parsing, Python overhead)</td><td>~0&ndash;1ms</td><td>negligible</td></tr>
+  </tbody>
+</table>
+
+<p>Pub/Sub transit dominates almost entirely &mdash; BigQuery's write is comparatively cheap, and the service's own code (parsing, logging) adds essentially nothing.</p>
+
+<h2>Method</h2>
+<p>This was a <strong>real</strong> simulation, not a mock: real <code>gcloud</code> Application Default Credentials publishing to the real Pub/Sub topic (<code>lens-dgx-spark-dev-input</code>), consumed by the actual running <code>lens-dgx-backend</code> systemd service, with real BigQuery writes to the production <code>results</code> table.</p>
+<p>For each of 5 test messages:</p>
+<ol>
+  <li>Called vLLM directly over HTTP (bypassing Pub/Sub and BigQuery entirely) as a same-prompt baseline.</li>
+  <li>Published the identical prompt through the real pipeline, as a proper <code>run_id</code>/<code>project_id</code>/<code>letter_id</code>/<code>datetime_sent</code>/<code>letter_body</code> payload, timestamped at the moment of publish.</li>
+  <li>Polled the service's own <code>logs/inference_log.jsonl</code> until that message's entry appeared, carrying the full timing breakdown the service itself measured.</li>
+</ol>
+<p>The overhead formula used:</p>
+<pre>overhead_ms = (transit_latency_ms + total_processing_ms) - inference_latency_ms</pre>
+<p>&hellip; i.e. everything between "message published" and "message acked" that <strong>isn't</strong> the vLLM call.</p>
+
+<h2>Results</h2>
+<table>
+  <caption>Per-message timing (ms). <code>baseline_inf</code> = direct vLLM call, bypassing the pipeline; <code>pipe_inf</code> = the same call as measured inside the real pipeline.</caption>
+  <thead>
+    <tr>
+      <th class="l">run_id</th><th class="l">status</th>
+      <th>baseline_inf</th><th>pipe_inf</th><th>transit</th><th>bq_insert</th><th>total_proc</th><th>overhead</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="l mono">743914d8</td><td class="l status-ok">ok</td><td>6559</td><td>7494</td><td>2019</td><td>147</td><td>7642</td><td>2167</td></tr>
+    <tr><td class="l mono">b9f82fa2</td><td class="l status-err">parse_error</td><td>2322</td><td>3220</td><td>1308</td><td>465</td><td>3686</td><td>1774</td></tr>
+    <tr><td class="l mono">c384f572</td><td class="l status-ok">ok</td><td>9531</td><td>5107</td><td>1217</td><td>99</td><td>5206</td><td>1316</td></tr>
+    <tr><td class="l mono">0f25a0f3</td><td class="l status-err">parse_error</td><td>4378</td><td>5532</td><td>1746</td><td>52</td><td>5584</td><td>1798</td></tr>
+    <tr><td class="l mono">e3d5cca1</td><td class="l status-err">parse_error</td><td>14660</td><td>2008</td><td>1199</td><td>51</td><td>2060</td><td>1251</td></tr>
+    <tr class="summary"><td class="l" colspan="2">MEAN</td><td>7490</td><td>4672</td><td>1498</td><td>163</td><td>4835</td><td>1661</td></tr>
+    <tr class="summary"><td class="l" colspan="2">MEDIAN</td><td>6559</td><td>5107</td><td>1308</td><td>99</td><td>5206</td><td>1774</td></tr>
+  </tbody>
+</table>
+
+<h2>Caveats</h2>
+<div class="callout caveat">
+  <ul>
+    <li><strong>Publisher and subscriber ran on the same machine</strong> for this test &mdash; no real network hop between them. The actual LENS &harr; DGX deployment is two separate machines, so real transit time there will include genuine network latency on top of this; this measures Pub/Sub's own overhead floor, not the full real-world number.</li>
+    <li><strong><code>transit_latency_ms</code> depends on clock agreement</strong> between publisher and subscriber. Same machine here, so no skew; across two real machines, any NTP drift between them would bias this number &mdash; worth confirming clocks are synced before trusting it in production.</li>
+    <li><strong>N=5 is small</strong>, and vLLM's own latency is highly variable: <code>baseline_inf</code> ranged 2.3s&ndash;14.7s for the <em>same instruction</em>, and <code>pipe_inf</code> doesn't track it closely either &mdash; <code>openai/gpt-oss-20b</code> isn't reliably obeying the "CSV only" instruction used for this test, hence 3/5 <code>parse_error</code> outcomes. That noise is exactly why the roundabout cost was isolated from vLLM's own time directly (via the formula above) rather than by comparing baseline vs. pipeline inference times.</li>
+  </ul>
+</div>
+
+<h2>Side effect</h2>
+<p>This test wrote 5 real rows into the production <code>lens_dgx_spark_dev.results</code> BigQuery table (<code>project_id = "roundabout-sim"</code>), so they can be identified and removed if desired.</p>
+
+<footer>
+  Generated during the <code>feature/lens-compat</code> development session &middot; see <code>PROGRESS_LOG.md</code> for surrounding context.
+</footer>
+
+</body>
+</html>

@@ -12,6 +12,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from google.cloud import bigquery, pubsub_v1
@@ -55,21 +56,38 @@ def main() -> int:
     logger.info("listening on %s (log: %s) ...", subscription_path,
                 os.path.join(config.log_dir, "inference_log.jsonl"))
 
+    shutdown_requested = threading.Event()
+
     def _shutdown(signum, frame):
         logger.info("received signal %s, shutting down...", signum)
+        shutdown_requested.set()
         streaming_pull_future.cancel()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
+    # Exit code matters here: on 2026-10-28, an unhandled exception from a
+    # single bad message propagated all the way up to .result(), which this
+    # function treated as a normal "stream ended" event and returned 0 for
+    # -- a *clean* exit, so systemd's Restart=on-failure never fired and the
+    # whole service silently stopped processing messages. consume.py now
+    # has its own safety net so a bad message shouldn't reach here at all,
+    # but if .result() ever raises for some other reason (and it wasn't us
+    # asking it to stop via a signal), that's unexpected and should make the
+    # process exit non-zero so systemd restarts it automatically.
+    exit_code = 0
     with subscriber:
         try:
             streaming_pull_future.result()
-        except Exception as exc:  # noqa: BLE001 - stream ended, log and exit cleanly
-            logger.info("stream ended: %s", exc)
+        except Exception as exc:
+            if shutdown_requested.is_set():
+                logger.info("stream ended (requested shutdown): %s", exc)
+            else:
+                logger.error("stream ended UNEXPECTEDLY (not a requested shutdown): %s", exc)
+                exit_code = 1
 
     logger.info("shutdown complete")
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":
