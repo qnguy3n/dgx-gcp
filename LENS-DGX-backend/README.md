@@ -52,6 +52,18 @@ The model's response can be **JSON** (preferred, as LENS prompts produce) or
 **CSV** (header row + data rows). `csv_parse.py` tries JSON first and falls
 back to CSV, so both shapes are stored correctly in BigQuery.
 
+## Concurrency, not batching
+
+Each Pub/Sub message carries exactly one letter — there is no batch mode,
+and nothing here parses a multi-letter payload. `LENS_DGX_MAX_CONCURRENCY`
+(default `4`, see the env var table below) controls how many *separate*
+messages can be in flight at once, via Pub/Sub's flow control and a thread
+pool in `main.py` — so up to that many letters are processed in parallel.
+That's concurrency across independent messages, not several letters bundled
+into one. (Bundling was tried once as a one-off experiment outside this
+service's actual code path, to measure what it would cost/save if ever
+implemented — see `../docs/batch-size-vs-latency.html`.)
+
 ## Timing
 
 Every message gets a four-stage timing breakdown, logged to both the regular
@@ -103,6 +115,33 @@ processed_at TIMESTAMP
 Query example for a specific run: `SELECT run_id, JSON_VALUE(fields, '$.category') FROM ... WHERE run_id = '...'`.
 
 ## Setup
+
+### Credentials
+
+Before running anything, put the GCP service-account key(s) here:
+
+```
+LENS-DGX-backend/credentials/dev_auth.json
+LENS-DGX-backend/credentials/prod_auth.json   # only needed for LENS_DGX_ENV=prod
+```
+
+This is the exact default `GOOGLE_APPLICATION_CREDENTIALS` path `config.py`
+resolves to for each environment (see the env var table below) — nothing
+else needs to be set if the key is placed there. Only `dev_auth.json` is
+required to run in the default `dev` environment.
+
+```bash
+mkdir -p credentials
+cp /path/to/your-key.json credentials/dev_auth.json
+chmod 600 credentials/dev_auth.json
+```
+
+`credentials/` is git-ignored (see `.gitignore`) — keys never get
+committed. If running via Docker instead of the venv below, bind-mount this
+directory rather than baking it into the image:
+`-v $(pwd)/credentials:/app/credentials:ro` (see `Dockerfile`).
+
+### Install
 
 ```bash
 cd LENS-DGX-backend
