@@ -3,6 +3,59 @@
 Chronological record of work on this repo and the DGX Spark deployment it
 documents. Latest entries on top.
 
+## 2026-11-10 — Full GCP pipeline confirmed end-to-end functional
+
+Ran `dgx-gcp/LENS-DGX-backend/tools/tests/test_e2e_pubsub_bq.py` — a new
+end-to-end test script that publishes a message in LENS `run_id` format
+(`{lens_run_id}:{letter_id}`) to Pub/Sub and polls BigQuery until the result
+row appears.
+
+**Results:**
+- Pub/Sub publish: succeeded immediately (message ID `23243735039088145`)
+- BQ result received: ~46 s end-to-end
+- `status: parse_error` — expected for a plain-text test message with no
+  extraction prompt; the model returned free-text markdown and the CSV parser
+  could not parse it. This is benign — a real LENS run sends a structured
+  extraction prompt and the model returns JSON, which is handled correctly.
+- `latency_ms: ~38,900 ms` — vLLM inference time on the DGX side.
+
+**The full pipeline is functional**: LENS VM → Pub/Sub → DGX (vLLM) → BigQuery
+→ LENS VM poll. The two previously-reported blockers (VPC SC and missing BQ
+OAuth scope) are both resolved — BigQuery queries now succeed using ADC user
+credentials (`qnguyen@mehresearch.org`) without any service-account key file.
+
+Added `tools/tests/test_e2e_pubsub_bq.py` to the repo as the canonical
+roundtrip smoke test.
+
+---
+
+## 2026-11-05 — BigQuery read from LENS VM blocked; awaiting admin fix
+
+Investigated whether the LENS VM can query BigQuery results directly (required
+for `core/dgx.py`'s `poll_results()`). Found two separate blockers:
+
+1. **VPC Service Controls** — initial attempts with both ADC user credentials
+   and `dev_auth.json` (`dgx-spark-dev` SA) were blocked:
+   `403 VPC Service Controls: Request is prohibited by organization's policy.`
+   Admin confirmed they fixed the perimeter for the VM's default SA
+   (`621293162637-compute@developer.gserviceaccount.com`). `dgx-spark-dev` SA
+   is still blocked by VPC SC.
+
+2. **Missing BigQuery OAuth scope on the VM** — after the VPC SC fix, queries
+   via the VM's default SA now fail with:
+   `403 Access Denied: BigQuery: Missing required OAuth scope. Need BigQuery or
+   Cloud Platform read scope.`
+   The VM has only the default compute scopes; `https://www.googleapis.com/auth/bigquery`
+   is not included. OAuth scopes can only be changed by stopping the VM.
+
+**Status: blocked, waiting on admin.** Two options proposed:
+- Option 1: Stop VM and add BigQuery scope → VM default SA works, no key file needed
+- Option 2: Add `dgx-spark-dev` SA to VPC SC perimeter → `dev_auth.json` works, no VM restart
+
+Added `tools/tests/query_bq.py` — queries the dev results table (latest 10 rows,
+or filtered by `run_id` prefix matching `poll_results()` pattern).
+Pub/Sub publish and subscribe both confirmed working from this machine.
+
 ## 2026-10-27 — Realistic payload + timing instrumentation, BigQuery insert bug fix
 
 - `LENS-DGX-backend/tools/publish_test_message.py`: payload now carries
