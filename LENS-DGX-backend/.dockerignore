@@ -1,0 +1,11 @@
+.venv/
+credentials/
+logs/
+__pycache__/
+*.pyc
+service.out
+.git
+.gitignore
+lens-dgx-backend.example.service
+Dockerfile
+.dockerignore
